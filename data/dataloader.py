@@ -147,6 +147,39 @@ class BabiDataset:
 
         return tasks
 
+    def load_all_tasks_joint(self, train=True, max_size_per_task=None):
+        """Load all 20 tasks merged into a single shared-vocabulary corpus."""
+        vocab = {"<pad>": 0, "<unk>": 1}
+        next_idx = 2
+        all_stories, all_questions = [], []
+
+        for task_id in range(1, 21):
+            stories, questions, _ = self.load_task(
+                task_id, train=train, max_size=max_size_per_task
+            )
+            story_offset = len(all_stories)
+
+            for s in stories:
+                for sentence in s["sentences"]:
+                    for w in self.tokenize(sentence):
+                        if w not in vocab:
+                            vocab[w] = next_idx
+                            next_idx += 1
+
+            for q in questions:
+                for w in self.tokenize(q["question"]) + [q["answer"].lower()]:
+                    if w not in vocab:
+                        vocab[w] = next_idx
+                        next_idx += 1
+                q["story_id"] += story_offset
+                q["task_id"] = task_id
+
+            all_stories.extend(stories)
+            all_questions.extend(questions)
+
+        print(f"Joint corpus: {len(all_questions)} questions, vocab={len(vocab)}")
+        return all_stories, all_questions, vocab
+
     @staticmethod
     def tokenize(sentence):
         return (

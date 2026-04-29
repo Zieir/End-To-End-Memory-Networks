@@ -15,9 +15,11 @@ def evaluate_task(task_id, verbose=True):
     vocab = checkpoint['vocab']
     vocab_size = len(vocab)
     use_pe = checkpoint.get('use_pe', False)
+    use_rn = checkpoint.get('use_rn', False)
+    hops = checkpoint.get('hops', 3)
 
-    model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=3,
-                   use_pe=use_pe)
+    model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=hops,
+                   use_pe=use_pe, use_rn=use_rn)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval() 
 
