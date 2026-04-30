@@ -1,6 +1,6 @@
 import torch
 from data.dataloader import BabiDataset
-from model_3 import prepare_data_multi, MemN2N_MultiWord
+from model import prepare_data_multi, MemN2N_MultiWord
 
 def evaluate_multiword(task_id):
     checkpoint = torch.load(f"./models_multi/best_model_task{task_id}_multi.pth")

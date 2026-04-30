@@ -1,5 +1,5 @@
 import argparse
-from train import train_task, train_joint
+from train_miniBatch import train_task, train_joint
 from eval import evaluate_task
 from data.dataloader import BabiDataset
 
