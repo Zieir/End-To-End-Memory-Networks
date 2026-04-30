@@ -2,14 +2,12 @@ import os
 import torch
 import shutil
 from data.dataloader import BabiDataset
-from train_3 import train_multiword
-from eval_3 import evaluate_multiword
+from .train import train_multiword
+from .eval import evaluate_multiword
 
 def run_pipeline_multi(n_runs=10, epochs=100):
     dataset = BabiDataset(download=False)
-    
-    # Storage directories
-    tmp_dir = "./models_multi"
+
     gold_dir = "./models_multi_word"
     os.makedirs(gold_dir, exist_ok=True)
 
@@ -22,39 +20,41 @@ def run_pipeline_multi(n_runs=10, epochs=100):
         print(f"{'='*60}")
         print(f"TASK {task_id:02d} : {task_desc}")
         print(f"{'='*60}")
-        
-        best_acc_found = -1.0
-        
+
+        best_val_found = -1.0
+        best_test_for_task = 0.0
+
         for run in range(n_runs):
             seed = run
             print(f"\n--- Run {run+1}/{n_runs} (Seed: {seed}) ---")
-            
-            # Training utilizes Position Encoding (PE) and Linear Start (LS) internally[cite: 15, 16]
-            current_acc = train_multiword(
-                task_id=task_id, 
-                epochs=epochs, 
+
+            run_val_acc, run_test_acc = train_multiword(
+                task_id=task_id,
+                epochs=epochs,
                 seed=seed,
                 max_ans_len=5
-            )[cite: 16]
-            
-            # Update absolute best for this specific task
-            if current_acc > best_acc_found:
-                best_acc_found = current_acc
-                
-                # Copy the temporary best of this run to the final gold directory[cite: 16]
+            )
+
+            # Best-of-N selection on validation accuracy (no test-set leakage)
+            if run_val_acc > best_val_found:
+                best_val_found = run_val_acc
+                best_test_for_task = run_test_acc
+
                 src_path = f"./models_multi/best_model_task{task_id}_multi.pth"
                 dst_path = os.path.join(gold_dir, f"gold_model_task{task_id}_multi.pth")
-                
+
                 if os.path.exists(src_path):
                     shutil.copyfile(src_path, dst_path)
-                
-                print(f"New Absolute Best for Task {task_id} : {best_acc_found:.4f} accuracy")
+
+                print(f"New Best for Task {task_id}: val={best_val_found:.4f}, "
+                      f"test={best_test_for_task:.4f}")
             else:
-                print(f"Run {run+1} result ({current_acc:.4f}) did not beat (Best: {best_acc_found:.4f})")
+                print(f"Run {run+1} val={run_val_acc:.4f} did not beat best val "
+                      f"({best_val_found:.4f})")
 
         best_scores[task_id] = {
             'description': task_desc,
-            'accuracy': best_acc_found
+            'accuracy': best_test_for_task
         }
 
     # Final Results Table Summary

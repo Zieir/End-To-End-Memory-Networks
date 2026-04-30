@@ -17,9 +17,12 @@ def evaluate_task(task_id, verbose=True):
     use_pe = checkpoint.get('use_pe', False)
     use_rn = checkpoint.get('use_rn', False)
     hops = checkpoint.get('hops', 3)
+    tying = checkpoint.get('tying', 'adjacent')
+    use_relu = checkpoint.get('use_relu', False)
+    embed_size = checkpoint.get('embed_size', 20)
 
-    model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=hops,
-                   use_pe=use_pe, use_rn=use_rn)
+    model = MemN2N(vocab_size=vocab_size, embed_size=embed_size, max_story_len=50, hops=hops,
+                   use_pe=use_pe, use_rn=use_rn, tying=tying, use_relu=use_relu)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval() 
 

@@ -9,7 +9,8 @@ from model import MemN2N, prepare_data
 def train_task(task_id, epochs=100, batch_size=32, verbose=True,
                use_ls=True, use_pe=False, use_rn=False, hops=3,
                ls_lr=0.005, post_ls_lr=0.01,
-               ls_patience=5, val_frac=0.1, seed=0):
+               ls_patience=5, val_frac=0.1, seed=0,
+               tying='adjacent', use_relu=False):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -34,7 +35,7 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
 
     vocab_size = len(vocab)
     model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=hops,
-                   use_pe=use_pe, use_rn=use_rn)
+                   use_pe=use_pe, use_rn=use_rn, tying=tying, use_relu=use_relu)
 
     criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
 
@@ -44,7 +45,8 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
     optimizer = optim.SGD(model.parameters(), lr=init_lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.5)
 
-    best_test_acc = 0.0
+    best_val_acc = -1.0
+    final_test_acc = 0.0
     best_val_loss = float("inf")
     bad_epochs = 0
 
@@ -78,15 +80,19 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
         with torch.no_grad():
             val_logits = model(Xs_val, Xq_val)
             val_loss = criterion(val_logits, Y_val).item() / max(1, len(Y_val))
+            val_preds = torch.argmax(val_logits, dim=1)
+            current_val_acc = (val_preds == Y_val).sum().item() / max(1, len(Y_val))
 
             test_logits = model(X_test_story, X_test_query)
             test_preds = torch.argmax(test_logits, dim=1)
             current_test_acc = (test_preds == Y_test).sum().item() / len(Y_test)
 
-        if current_test_acc > best_test_acc:
-            best_test_acc = current_test_acc
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
+            final_test_acc = current_test_acc
             checkpoint = {'state_dict': model.state_dict(), 'vocab': vocab,
-                          'use_pe': use_pe, 'use_rn': use_rn, 'hops': hops}
+                          'use_pe': use_pe, 'use_rn': use_rn, 'hops': hops,
+                          'tying': tying, 'use_relu': use_relu}
             torch.save(checkpoint, save_path)
             saved_marker = " --> Model Saved!"
         else:
@@ -114,15 +120,17 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
             print(f"[{tag}] Epoch {epoch+1:03d}/{epochs} | "
                   f"TrainLoss: {total_loss/num_samples:.4f} | "
                   f"ValLoss: {val_loss:.4f} | "
+                  f"ValAcc: {current_val_acc:.4f} | "
                   f"TestAcc: {current_test_acc:.4f}{saved_marker}")
 
-    return best_test_acc
+    return best_val_acc, final_test_acc
 
 def train_joint(epochs=60, batch_size=32, verbose=True,
                 use_ls=True, use_pe=False, use_rn=False, hops=3,
                 ls_lr=0.005, post_ls_lr=0.01,
                 ls_patience=5, val_frac=0.1, seed=0,
-                embed_size=50, anneal_step=15):
+                embed_size=50, anneal_step=15,
+                tying='adjacent', use_relu=False):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -164,7 +172,8 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     # 4. Model Setup
     model = MemN2N(vocab_size=len(vocab), embed_size=embed_size,
                    max_story_len=50, hops=hops,
-                   use_pe=use_pe, use_rn=use_rn)
+                   use_pe=use_pe, use_rn=use_rn,
+                   tying=tying, use_relu=use_relu)
 
     criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
     ls_phase = use_ls
@@ -172,15 +181,17 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     optimizer = optim.SGD(model.parameters(), lr=ls_lr if ls_phase else post_ls_lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=anneal_step, gamma=0.5)
 
-    best_mean_acc = 0.0
+    best_val_acc = -1.0
     best_per_task = None
+    best_val_loss = float("inf")
+    bad_epochs = 0
 
     # 5. Training Loop
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
         epoch_perm = torch.randperm(len(Y_tr), generator=g)
-        
+
         for i in range(0, len(Y_tr), batch_size):
             idx = epoch_perm[i:i+batch_size]
             optimizer.zero_grad()
@@ -190,20 +201,21 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
             torch.nn.utils.clip_grad_norm_(model.parameters(), 40.0)
             optimizer.step()
             total_loss += loss.item()
-        
+
         scheduler.step()
 
         # --- MEMORY EFFICIENT EVALUATION ---
         model.eval()
         with torch.no_grad():
-            # Batch evaluation for Validation set
             val_losses = []
+            val_correct = 0
             for i in range(0, len(Y_val), 64):
                 v_logits = model(Xs_val[i:i+64], Xq_val[i:i+64])
                 val_losses.append(criterion(v_logits, Y_val[i:i+64]))
+                val_correct += (torch.argmax(v_logits, dim=1) == Y_val[i:i+64]).sum().item()
             val_loss = sum(val_losses).item() / len(Y_val)
+            current_val_acc = val_correct / max(1, len(Y_val))
 
-            # Batch evaluation for Test set (The part that crashed)
             all_preds = []
             for i in range(0, len(Y_test), 64):
                 t_logits = model(X_test_story[i:i+64], X_test_query[i:i+64])
@@ -214,21 +226,40 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
             for tid in range(1, 21):
                 mask = task_ids_test == tid
                 per_task[tid] = (test_preds[mask] == Y_test[mask]).float().mean().item()
-            
+
             mean_acc = sum(per_task.values()) / 20
 
-        # Save Best Model[cite: 16]
-        if mean_acc > best_mean_acc:
-            best_mean_acc = mean_acc
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
             best_per_task = dict(per_task)
-            torch.save({'state_dict': model.state_dict(), 'vocab': vocab, 
-                        'hops': hops, 'embed_size': embed_size}, save_path)
+            torch.save({'state_dict': model.state_dict(), 'vocab': vocab,
+                        'hops': hops, 'embed_size': embed_size,
+                        'use_pe': use_pe, 'use_rn': use_rn,
+                        'tying': tying, 'use_relu': use_relu}, save_path)
+
+        # Linear Start plateau detection — re-insert softmaxes when val loss stops improving
+        if ls_phase:
+            if val_loss + 1e-4 < best_val_loss:
+                best_val_loss = val_loss
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+            if bad_epochs >= ls_patience:
+                ls_phase = False
+                model.use_softmax = True
+                optimizer = optim.SGD(model.parameters(), lr=post_ls_lr)
+                scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=anneal_step, gamma=0.5)
+                best_val_loss = float("inf")
+                bad_epochs = 0
+                if verbose:
+                    print(f"Epoch {epoch+1:03d}: val loss plateaued — re-inserting softmaxes")
 
         if verbose and (epoch + 1) % 5 == 0:
             tag = "LS" if ls_phase else "SM"
-            print(f"[{tag}] Epoch {epoch+1:03d} | TrainLoss: {total_loss/len(Y_tr):.4f} | MeanAcc: {mean_acc:.4f}")
+            print(f"[{tag}] Epoch {epoch+1:03d} | TrainLoss: {total_loss/len(Y_tr):.4f} | "
+                  f"ValAcc: {current_val_acc:.4f} | MeanAcc: {mean_acc:.4f}")
 
-    return best_per_task
+    return best_val_acc, best_per_task
 
 if __name__ == "__main__":
     task = int(sys.argv[1]) if len(sys.argv) > 1 else 1
