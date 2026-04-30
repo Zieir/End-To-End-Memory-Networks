@@ -4,7 +4,8 @@ from data.dataloader import BabiDataset
 from train import train_task
 from eval import evaluate_task
 
-def run_best_of_n(n_runs=10, use_ls=True, use_pe=True, use_rn=False, hops=3, epochs=100):
+def run_best_of_n(n_runs=10, use_ls=True, use_pe=True, use_rn=False, hops=3, epochs=100,
+                  tying='adjacent', use_relu=False):
     dataset = BabiDataset(download=False)
     results = {}
     
@@ -18,44 +19,45 @@ def run_best_of_n(n_runs=10, use_ls=True, use_pe=True, use_rn=False, hops=3, epo
         task_desc = dataset.TASK_DESCRIPTIONS[task_id]
         print(f"\nPROCESSING TASK {task_id}: {task_desc}\n")
         
-        best_acc_for_task = -1.0
-        
+        best_val_for_task = -1.0
+        best_test_for_task = 0.0
+
         for run in range(n_runs):
             seed = run  # Use run index as seed for reproducibility
             print(f"\n--- Task {task_id} | Run {run+1}/{n_runs} (Seed: {seed}) ---")
-            
-            # Train the model for this run
-            # train_task saves the model to ./models/best_model_task{task_id}.pth 
-            # internally if it beats its own internal validation during that run
-            current_run_acc = train_task(
-                task_id, 
-                epochs=epochs, 
+
+            # Train the model for this run; returns (val_acc, test_acc)
+            run_val_acc, run_test_acc = train_task(
+                task_id,
+                epochs=epochs,
                 verbose=False,
-                use_ls=use_ls, 
-                use_pe=use_pe, 
+                use_ls=use_ls,
+                use_pe=use_pe,
                 use_rn=use_rn,
-                hops=hops, 
-                seed=seed
+                hops=hops,
+                seed=seed,
+                tying=tying,
+                use_relu=use_relu,
             )
-            
-            # Evaluate the model saved by this run
-            # We compare it against the absolute best found across all previous 10-run attempts
-            if current_run_acc > best_acc_for_task:
-                best_acc_for_task = current_run_acc
-                # Rename/keep this as the absolute gold model for this task
+
+            # Select the best run on VALIDATION accuracy (no test-set leakage)
+            if run_val_acc > best_val_for_task:
+                best_val_for_task = run_val_acc
+                best_test_for_task = run_test_acc
                 gold_path = os.path.join(save_dir, f"gold_model_task{task_id}.pth")
                 temp_path = os.path.join(save_dir, f"best_model_task{task_id}.pth")
-                
-                # Check if the file exists before attempting to copy/move
+
                 if os.path.exists(temp_path):
                     import shutil
                     shutil.copyfile(temp_path, gold_path)
-                
-                print(f"New Absolute Best for Task {task_id}: {best_acc_for_task:.4f}")
-            else:
-                print(f"Run {run+1} result ({current_run_acc:.4f}) did not beat best ({best_acc_for_task:.4f})")
 
-        results[task_id] = best_acc_for_task
+                print(f"New Best for Task {task_id}: val={best_val_for_task:.4f}, "
+                      f"test={best_test_for_task:.4f}")
+            else:
+                print(f"Run {run+1} val={run_val_acc:.4f} did not beat best val "
+                      f"({best_val_for_task:.4f})")
+
+        results[task_id] = best_test_for_task
 
     # Final Summary
     print(f"\nFINAL BEST-OF-{n_runs} SUMMARY\n")

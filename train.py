@@ -9,7 +9,8 @@ from model import MemN2N, prepare_data
 def train_task(task_id, epochs=100, batch_size=32, verbose=True,
                use_ls=True, use_pe=False, use_rn=False, hops=3,
                ls_lr=0.005, post_ls_lr=0.01,
-               ls_patience=5, val_frac=0.1, seed=0):
+               ls_patience=5, val_frac=0.1, seed=0,
+               tying='adjacent', use_relu=False):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -34,7 +35,7 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
 
     vocab_size = len(vocab)
     model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=hops,
-                   use_pe=use_pe, use_rn=use_rn)
+                   use_pe=use_pe, use_rn=use_rn, tying=tying, use_relu=use_relu)
 
     criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
 
@@ -44,7 +45,8 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
     optimizer = optim.SGD(model.parameters(), lr=init_lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.5)
 
-    best_test_acc = 0.0
+    best_val_acc = -1.0
+    final_test_acc = 0.0
     best_val_loss = float("inf")
     bad_epochs = 0
 
@@ -78,15 +80,19 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
         with torch.no_grad():
             val_logits = model(Xs_val, Xq_val)
             val_loss = criterion(val_logits, Y_val).item() / max(1, len(Y_val))
+            val_preds = torch.argmax(val_logits, dim=1)
+            current_val_acc = (val_preds == Y_val).sum().item() / max(1, len(Y_val))
 
             test_logits = model(X_test_story, X_test_query)
             test_preds = torch.argmax(test_logits, dim=1)
             current_test_acc = (test_preds == Y_test).sum().item() / len(Y_test)
 
-        if current_test_acc > best_test_acc:
-            best_test_acc = current_test_acc
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
+            final_test_acc = current_test_acc
             checkpoint = {'state_dict': model.state_dict(), 'vocab': vocab,
-                          'use_pe': use_pe, 'use_rn': use_rn, 'hops': hops}
+                          'use_pe': use_pe, 'use_rn': use_rn, 'hops': hops,
+                          'tying': tying, 'use_relu': use_relu}
             torch.save(checkpoint, save_path)
             saved_marker = " --> Model Saved!"
         else:
@@ -114,15 +120,17 @@ def train_task(task_id, epochs=100, batch_size=32, verbose=True,
             print(f"[{tag}] Epoch {epoch+1:03d}/{epochs} | "
                   f"TrainLoss: {total_loss/num_samples:.4f} | "
                   f"ValLoss: {val_loss:.4f} | "
+                  f"ValAcc: {current_val_acc:.4f} | "
                   f"TestAcc: {current_test_acc:.4f}{saved_marker}")
 
-    return best_test_acc
+    return best_val_acc, final_test_acc
 
 def train_joint(epochs=60, batch_size=32, verbose=True,
                 use_ls=True, use_pe=False, use_rn=False, hops=3,
                 ls_lr=0.005, post_ls_lr=0.01,
                 ls_patience=5, val_frac=0.1, seed=0,
-                embed_size=50, anneal_step=15):
+                embed_size=50, anneal_step=15,
+                tying='adjacent', use_relu=False):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -160,7 +168,8 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     vocab_size = len(vocab)
     model = MemN2N(vocab_size=vocab_size, embed_size=embed_size,
                    max_story_len=50, hops=hops,
-                   use_pe=use_pe, use_rn=use_rn)
+                   use_pe=use_pe, use_rn=use_rn,
+                   tying=tying, use_relu=use_relu)
 
     criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
 
@@ -170,7 +179,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     optimizer = optim.SGD(model.parameters(), lr=init_lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=anneal_step, gamma=0.5)
 
-    best_mean_acc = 0.0
+    best_val_acc = -1.0
     best_per_task = None
     best_val_loss = float("inf")
     bad_epochs = 0
@@ -206,6 +215,8 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
         with torch.no_grad():
             val_logits = model(Xs_val, Xq_val)
             val_loss = criterion(val_logits, Y_val).item() / max(1, len(Y_val))
+            val_preds = torch.argmax(val_logits, dim=1)
+            current_val_acc = (val_preds == Y_val).sum().item() / max(1, len(Y_val))
 
             test_logits = model(X_test_story, X_test_query)
             test_preds = torch.argmax(test_logits, dim=1)
@@ -216,14 +227,15 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
                     per_task[tid] = (test_preds[mask] == Y_test[mask]).float().mean().item()
             mean_acc = sum(per_task.values()) / 20
 
-        if mean_acc > best_mean_acc:
-            best_mean_acc = mean_acc
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
             best_per_task = dict(per_task)
             torch.save({'state_dict': model.state_dict(), 'vocab': vocab,
                         'use_pe': use_pe, 'use_rn': use_rn, 'hops': hops,
                         'embed_size': embed_size,
                         'max_sen_len': max_sen_len,
-                        'max_q_len': max_q_len}, save_path)
+                        'max_q_len': max_q_len,
+                        'tying': tying, 'use_relu': use_relu}, save_path)
 
         if ls_phase:
             if val_loss + 1e-4 < best_val_loss:
@@ -246,9 +258,10 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
             print(f"[{tag}] Epoch {epoch+1:03d}/{epochs} | "
                   f"TrainLoss: {total_loss/num_samples:.4f} | "
                   f"ValLoss: {val_loss:.4f} | "
+                  f"ValAcc: {current_val_acc:.4f} | "
                   f"MeanAcc: {mean_acc:.4f}")
 
-    return best_per_task
+    return best_val_acc, best_per_task
 
 if __name__ == "__main__":
     task = int(sys.argv[1]) if len(sys.argv) > 1 else 1

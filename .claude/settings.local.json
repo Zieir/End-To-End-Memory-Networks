@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(command -v pdftotext)",
+      "Bash(pdftotext -layout \"c:/Users/eloib/Perso/Fac/M1/T4/Deep Learning/End-To-End-Memory-Networks/1503.08895v5.pdf\" /tmp/memnn_paper.txt)",
+      "Read(//tmp/**)",
+      "Bash(python -m py_compile multiWord/model.py multiWord/train.py multiWord/eval.py multiWord/run_all_multi.py train.py train_miniBatch.py UCL_Train.py UCL_train_joint.py)",
+      "Bash(python -m py_compile multiWord/model.py multiWord/train.py multiWord/eval.py multiWord/run_all_multi.py)",
+      "Bash(python -m py_compile model.py train.py train_miniBatch.py eval.py run_all.py UCL_Train.py UCL_train_joint.py multiWord/model.py multiWord/train.py multiWord/eval.py multiWord/run_all_multi.py)",
+      "Bash(python -m py_compile model.py multiWord/model.py train.py train_miniBatch.py eval.py run_all.py UCL_Train.py UCL_train_joint.py multiWord/train.py multiWord/eval.py multiWord/run_all_multi.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
