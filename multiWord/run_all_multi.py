@@ -109,12 +109,12 @@ def train_joint_multiword(epochs=60, batch_size=32, n_runs=5, val_frac=0.1, embe
 
     vocab_size = len(vocab)
     
-    # Calcul dynamique de la longueur maximale d'une réponse sur TOUTES les tâches
+    # Calcul de la longueur maximale d'une réponse sur TOUTES les tâches
     all_questions = questions_train + questions_test
     max_ans_len = max(len(BabiDataset.tokenize(q["answer"])) for q in all_questions)
     print(f"Vocabulaire global : {vocab_size} mots | Longueur max de réponse : {max_ans_len} mots")
 
-    # Préparation des tenseurs (peut prendre quelques secondes)
+    # Préparation des tenseurs 
     X_train_story, X_train_query, Y_train = prepare_data_multi(
         questions_train, stories_train, vocab, max_ans_len=max_ans_len)
     X_test_story, X_test_query, Y_test = prepare_data_multi(
@@ -169,11 +169,10 @@ def train_joint_multiword(epochs=60, batch_size=32, n_runs=5, val_frac=0.1, embe
                 optimizer.step()
                 total_loss += loss.item()
 
-            # --- ÉVALUATION SÉCURISÉE EN MÉMOIRE (ANTI-CRASH) ---
             model.eval()
             with torch.no_grad():
                 all_preds = []
-                # Découpage strict par 64 pour le décodeur RNN (très lourd en RAM)
+                # Découpage strict par 64 pour le décodeur RNN 
                 for i in range(0, len(Y_test), 64):
                     t_logits = model(X_test_story[i:i+64], X_test_query[i:i+64])
                     all_preds.append(torch.argmax(t_logits, dim=2)) # dim=2 pour les séquences
@@ -230,5 +229,4 @@ def train_joint_multiword(epochs=60, batch_size=32, n_runs=5, val_frac=0.1, embe
     print(f"Mean Error Rate: {total_error / 20:>34.1f}%")
 
 if __name__ == "__main__":
-    # Lancement direct : 5 tentatives de 60 epochs (Ajustez si votre PC est rapide)
     train_joint_multiword(epochs=60, batch_size=32, n_runs=5)

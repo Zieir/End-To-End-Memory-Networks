@@ -75,7 +75,7 @@ def run_joint_best(n_runs=5, use_ls=True, use_pe=True, use_rn=False, hops=3, epo
 
         run_test_mean = sum(per_task_acc.values()) / 20
 
-        # Select the best run on VALIDATION accuracy (no test-set leakage)
+        # Select the best run on VALIDATION accuracy 
         if run_val_acc > best_val_acc:
             best_val_acc = run_val_acc
             best_test_mean = run_test_mean

@@ -117,7 +117,7 @@ def prepare_data(questions, stories, word2idx, max_story_len=50):
     return torch.stack(X_story), torch.stack(X_query), torch.tensor(Y_answer)
 
 def main():
-    # 1. Load Data
+    # Load Data
     dataset = BabiDataset(download=True)
     task_id = 1 # Let's train on Task 1 for the project demonstration
     stories, questions, vocab = dataset.load_task(task_id, train=True)
@@ -125,11 +125,11 @@ def main():
     # Convert to tensors
     X_story, X_query, Y = prepare_data(questions, stories, vocab)
     
-    # 2. Initialize Model
+    # Initialize Model
     vocab_size = len(vocab)
     model = MemN2N(vocab_size=vocab_size, embed_size=20, max_story_len=50, hops=3)
     
-    # 3. Setup Training
+    #  Setup Training
     criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')    
     optimizer = optim.SGD(model.parameters(), lr=0.01)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.5)
@@ -140,7 +140,7 @@ def main():
     
     print(f"\nTraining MemN2N on Task {task_id} with vocabulary size {vocab_size}...")
     
-    # 4. Training Loop
+    #  Training Loop
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -173,7 +173,7 @@ def main():
             print(f"Epoch {epoch+1:03d}/{epochs} | Loss: {total_loss/num_samples:.4f} | Accuracy: {acc:.4f}")
 
             
-    # --- EVALUATION ON TEST SET ---
+    #  EVALUATION ON TEST SET 
     print("\nLoading Test Data...")
     test_stories, test_questions, _ = dataset.load_task(task_id, train=False)
     

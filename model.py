@@ -24,7 +24,7 @@ class MemN2N(nn.Module):
 
         if tying == 'adjacent':
             # Adjacent tying: A_{k+1} = C_k, B = A_1, W^T = C_K
-            # Stored as K+1 distinct matrices; forward indexes them as A_k = embeddings[k], C_k = embeddings[k+1].
+            # Stored as K+1 distinct matrices, forward indexes them as A_k = embeddings[k], C_k = embeddings[k+1].
             self.embeddings = nn.ModuleList([
                 nn.Embedding(vocab_size, embed_size, padding_idx=0)
                 for _ in range(hops + 1)
@@ -175,8 +175,7 @@ def prepare_data(questions, stories, word2idx, max_story_len=50,
         story_text = stories[story_idx]["sentences"][-max_story_len:]
 
         story_tensor = torch.zeros((max_story_len, max_sen_len), dtype=torch.long)
-        # Right-align: most recent sentence ends up at row max_story_len - 1
-        # so time_idx [N, N-1, ..., 1] correctly maps row 49 -> time_idx 1 (newest).
+        
         offset = max_story_len - len(story_text)
         for i, sentence in enumerate(story_text):
             tokens = BabiDataset.tokenize(sentence)

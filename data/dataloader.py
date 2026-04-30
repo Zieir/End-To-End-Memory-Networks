@@ -1,6 +1,5 @@
 """
 Working bAbI Dataset Loader
-Compatible with Python 3.10+
 """
 
 import tarfile

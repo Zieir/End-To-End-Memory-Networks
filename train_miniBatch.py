@@ -139,7 +139,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, "best_model_joint.pth")
 
-    # 1. Load Data
+    # Load Data
     dataset = BabiDataset(download=True)
     stories_train, questions_train, vocab = dataset.load_all_tasks_joint(train=True)
     stories_test, questions_test, _ = dataset.load_all_tasks_joint(train=False)
@@ -149,7 +149,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     max_sen_len = max(len(BabiDataset.tokenize(s)) for st in all_stories for s in st["sentences"])
     max_q_len = max(len(BabiDataset.tokenize(q["question"])) for q in all_questions)
 
-    # 2. Prepare Tensors
+    # Prepare Tensors
     X_train_story, X_train_query, Y_train = prepare_data(
         questions_train, stories_train, vocab,
         max_sen_len=max_sen_len, max_q_len=max_q_len)
@@ -159,7 +159,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
 
     task_ids_test = torch.tensor([q["task_id"] for q in questions_test])
 
-    # 3. Validation Split
+    #  Validation Split
     g = torch.Generator().manual_seed(seed)
     n = len(Y_train)
     n_val = max(1, int(n * val_frac))
@@ -169,7 +169,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     Xs_tr, Xq_tr, Y_tr = X_train_story[tr_idx], X_train_query[tr_idx], Y_train[tr_idx]
     Xs_val, Xq_val, Y_val = X_train_story[val_idx], X_train_query[val_idx], Y_train[val_idx]
 
-    # 4. Model Setup
+    #  Model Setup
     model = MemN2N(vocab_size=len(vocab), embed_size=embed_size,
                    max_story_len=50, hops=hops,
                    use_pe=use_pe, use_rn=use_rn,
@@ -186,7 +186,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
     best_val_loss = float("inf")
     bad_epochs = 0
 
-    # 5. Training Loop
+    #  Training Loop
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
@@ -204,7 +204,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
 
         scheduler.step()
 
-        # --- MEMORY EFFICIENT EVALUATION ---
+
         model.eval()
         with torch.no_grad():
             val_losses = []
@@ -237,7 +237,7 @@ def train_joint(epochs=60, batch_size=32, verbose=True,
                         'use_pe': use_pe, 'use_rn': use_rn,
                         'tying': tying, 'use_relu': use_relu}, save_path)
 
-        # Linear Start plateau detection — re-insert softmaxes when val loss stops improving
+        # Linear Start plateau detection, re-insert softmaxes when val loss stops improving
         if ls_phase:
             if val_loss + 1e-4 < best_val_loss:
                 best_val_loss = val_loss
