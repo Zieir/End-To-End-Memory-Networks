@@ -36,19 +36,18 @@ class MemN2N_MultiWord(nn.Module):
         batch_size, num_sentences, _ = story.size()
         time_idx = torch.arange(num_sentences, 0, -1, device=story.device).unsqueeze(0).expand(batch_size, -1)
 
-        mem_mask = (story != 0).any(dim=2)  # (B, S)
-
+        # Encodage du contexte 'u'
         u = self.embeddings[0](query).sum(dim=1)
         for k in range(self.hops):
             m = self.embeddings[k](story).sum(dim=2) + self.temporal_embeddings[k](time_idx)
             c = self.embeddings[k+1](story).sum(dim=2) + self.temporal_embeddings[k+1](time_idx)
-            scores = torch.bmm(m, u.unsqueeze(2)).squeeze(2)
-            scores = scores.masked_fill(~mem_mask, -1e9)
-            p = torch.softmax(scores, dim=-1)
+            p = torch.softmax(torch.bmm(m, u.unsqueeze(2)).squeeze(2), dim=-1)
             o = torch.bmm(p.unsqueeze(1), c).squeeze(1)
             u = u + o
 
-        hidden = u.unsqueeze(0)
+        # Décodage séquentiel
+        hidden = u.unsqueeze(0) 
+        # On commence avec un vecteur nul pour le premier mot
         decoder_input = torch.zeros(batch_size, 1, self.embed_size, device=story.device)
 
         all_logits = []
@@ -59,10 +58,9 @@ class MemN2N_MultiWord(nn.Module):
 
             top_i = logits.argmax(1)
             decoder_input = self.embeddings[-1](top_i).unsqueeze(1)
-
-        return torch.stack(all_logits, dim=1)  # (batch, max_ans_len, vocab_size)
-
-
+            
+        return torch.stack(all_logits, dim=1) # (batch, max_ans_len, vocab_size)
+    
 def prepare_data_multi(questions, stories, word2idx, max_story_len=50,
                        max_sen_len=None, max_q_len=None, max_ans_len=5):
     """Like prepare_data, but answers are token sequences (padded to max_ans_len).
