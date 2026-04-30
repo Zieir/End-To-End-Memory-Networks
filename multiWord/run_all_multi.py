@@ -109,17 +109,30 @@ def train_joint_multiword(epochs=60, batch_size=32, n_runs=5, val_frac=0.1, embe
 
     vocab_size = len(vocab)
     
-    # Calcul dynamique de la longueur maximale d'une réponse sur TOUTES les tâches
+    # 1. Calcul dynamique CORRIGÉ de la longueur max de réponse (séparation par virgule)
     all_questions = questions_train + questions_test
-    max_ans_len = max(len(BabiDataset.tokenize(q["answer"])) for q in all_questions)
+    max_ans_len = max(len([t for t in q["answer"].split(",") if t.strip()]) for q in all_questions)
+    
+    # 2. Fixer les dimensions globales pour éviter les crashs Train vs Test
+    all_stories = stories_train + stories_test
+    max_sen_len = max(len(BabiDataset.tokenize(s)) for st in all_stories for s in st["sentences"])
+    max_q_len = max(len(BabiDataset.tokenize(q["question"])) for q in all_questions)
+
     print(f"Vocabulaire global : {vocab_size} mots | Longueur max de réponse : {max_ans_len} mots")
 
-    # Préparation des tenseurs (peut prendre quelques secondes)
+    # Utilisation des paramètres globaux
     X_train_story, X_train_query, Y_train = prepare_data_multi(
-        questions_train, stories_train, vocab, max_ans_len=max_ans_len)
+        questions_train, stories_train, vocab, 
+        max_sen_len=max_sen_len, max_q_len=max_q_len, max_ans_len=max_ans_len)
+    
     X_test_story, X_test_query, Y_test = prepare_data_multi(
-        questions_test, stories_test, vocab, max_ans_len=max_ans_len)
+        questions_test, stories_test, vocab, 
+        max_sen_len=max_sen_len, max_q_len=max_q_len, max_ans_len=max_ans_len)
 
+
+    vocab_size = max(vocab.values()) + 1 
+    print(f"Vocabulaire global final après parsing : {vocab_size} mots")
+    
     task_ids_test = torch.tensor([q["task_id"] for q in questions_test])
     num_samples = len(Y_train)
 
@@ -169,31 +182,37 @@ def train_joint_multiword(epochs=60, batch_size=32, n_runs=5, val_frac=0.1, embe
                 optimizer.step()
                 total_loss += loss.item()
 
-            # --- ÉVALUATION SÉCURISÉE EN MÉMOIRE (ANTI-CRASH) ---
+            # --- ÉVALUATION SÉCURISÉE EN MÉMOIRE ---
             model.eval()
             with torch.no_grad():
                 all_preds = []
-                # Découpage strict par 64 pour le décodeur RNN (très lourd en RAM)
                 for i in range(0, len(Y_test), 64):
                     t_logits = model(X_test_story[i:i+64], X_test_query[i:i+64])
-                    all_preds.append(torch.argmax(t_logits, dim=2)) # dim=2 pour les séquences
+                    all_preds.append(torch.argmax(t_logits, dim=2)) 
                 
                 test_preds = torch.cat(all_preds, dim=0)
 
-                # Calcul des scores (Exact Match par tâche)
                 per_task = {}
                 for tid in range(1, 21):
                     mask = task_ids_test == tid
                     if mask.any():
-                        correct = torch.all(test_preds[mask] == Y_test[mask], dim=1).sum().item()
+                        task_preds = test_preds[mask]
+                        task_targets = Y_test[mask]
+                        
+                        # Compare only the non-padding tokens[cite: 16, 17]
+                        # A prediction is correct if it matches the target wherever the target is not 0
+                        valid_mask = task_targets != 0 
+                        
+                        # For an answer to be perfectly correct, ALL valid tokens must match
+                        matches = (task_preds == task_targets) | ~valid_mask
+                        correct = torch.all(matches, dim=1).sum().item()
+                        
                         per_task[tid] = correct / mask.sum().item()
                 
                 mean_acc = sum(per_task.values()) / 20
-
+                
             if mean_acc > best_run_mean_acc:
                 best_run_mean_acc = mean_acc
-                
-                # Si c'est le meilleur score absolu de toutes les tentatives, on sauvegarde en Gold
                 if mean_acc > best_global_mean_acc:
                     best_global_mean_acc = mean_acc
                     best_global_per_task = dict(per_task)
